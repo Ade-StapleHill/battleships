@@ -57,9 +57,10 @@ class Vessel:
     self.sunk = False
 
   def pos(self, pos_index, horiz=True):
+    # save start/end in algebraic pos format e.g ('a1', 'a3')
     (row, col) = pos_index['index']  # e.g. (0, 0) for top left first row/first col
     (row, col) = (row, col + self.length-1) if horiz == True else (row + self.length-1, col) # end index
-    self.position = (pos_index, Map.pos_index_nocheck(index=(row, col), pos=None))
+    self.position = (pos_index['pos'], Map.pos_index_nocheck(index=(row, col), pos=None)['pos'])
 
   def is_placed(self):
     return False if self.position == None else True
@@ -108,7 +109,7 @@ class Map:
     self.vessels = []
     for v in vessel_list:
       for i in range(v[1]):
-        self.vessels.append(v[0]())
+        self.vessels.append(v[0]()) # object init
   
   def is_valid_index(self, row, col):
     # test (row, col) is within map dimensions
@@ -177,16 +178,6 @@ class Map:
     if index != None and (self.is_valid_index(*index) == False):
       index = None
     return index
-
-  def pos_index(self, pos=None, index=None):
-    # Provide either algebraic or array ref
-    # Create dict of map position to provide both map array (row, col) and 
-    # equivalent algebraic. Keys 'index' : (row,col) e.g. (0,0), 'pos': algebra e.g. 'a1'
-    if pos == None:
-      pos = self.index_to_pos(index)
-    elif index == None:
-      index = self.pos_to_index(pos)
-    return {'pos' : pos, 'index' : index}
   
   @staticmethod
   def pos_index_nocheck(pos=None, index=None):
@@ -196,6 +187,29 @@ class Map:
     elif index == None:
       index = Map.pos_to_index_nocheck(pos)
     return {'pos' : pos, 'index' : index}
+
+  def pos_index(self, pos=None, index=None):
+    # Provide either algebraic 'a1' or array ref (0,0)
+    # Create dict of map position to provide both map array (row, col) and 
+    # equivalent algebraic. Keys 'index' : (row,col) e.g. (0,0), 'pos': algebra e.g. 'a1'
+    pos_index = Map.pos_index_nocheck(pos, index)
+    idx = pos_index['index']
+    if idx == None or (self.is_valid_index(*idx) == False):
+      pos_index = None
+    return pos_index
+  
+  def pos_index_offset(self, pos_index):
+    # (row, col) to offset from (0, 0) assuming rows concatenated
+    pos_index_offset = pos_index
+    (row, col) = pos_index['index']
+    pos_index_offset['offset'] = row*self.nrows + col
+    return pos_index_offset
+  
+  def offset_to_index(self, offset):
+    # map offset to (row, col) index
+    row = offset / self.nrows
+    col = offset - (row * self.nrows)
+    return (row, col)
 
   @staticmethod
   def dump_arr(arr, str='', terse=True):
@@ -222,57 +236,34 @@ class Map:
 
   def spaces(self):
     # return two lists of any spaces, first for map in row order, second for map in column_order
-    horiz_list = self.space(self.map)
+    horiz_list = self.space(self.map) # list of (col, len) spaces for each map row
     # transpose array i.e. rows to cols e.g 
     # [['a','b','c'],['d','e','f'],['g','h','i']] => [('a', 'd', 'g'), ('b', 'e', 'h'), ('c', 'f', 'i')]
-    vert_list = self.space([*zip(*self.map)])
+    vert_list = self.space([*zip(*self.map)]) # list of (row, len) spaces for each map col
     if False:
       print("DBG : ", Map.dump_arr((horiz_list, vert_list), "spaces"))
-    return (horiz_list, vert_list)
-  
-  def spans(self, length):
-    # return two lists of spaces big enough for len, first row order then col order
-    spans = [[], []] # list of any space big enough or bigger 
-    spaces = self.spaces() # all space e.g. horiz = [[(0,2), (6,4), ...],...,[(7,2), (12,3), ...]]
-    for idx_o, o in enumerate(spaces):
-      spans[idx_o] = []
-      for row in o:
-        spans[idx_o].append([s for s in row if s[1] >= length])
-    if False:
-      print("DBG : ", Map.dump_arr(spans, "spans"))
-    return spans
+    return horiz_list, vert_list
 
   def available(self, length):
     # return list of (start, end) positions available to place vessel of length
     # two lists returned, horiz list first with space list per row, vert list is space list per col
-    spans = self.spans(length) # horiz and vert lists of any space big enough or bigger 
-    available = [[], []] # horiz and vert list of (start, end) position
-
-    if False:
-      test1 = [[i for i in range(4)] for _ in range(3)]
-      for r_idx, r in enumerate(test1):
-        for c_idx, c in enumerate(r):
-          test1[r_idx][c_idx] = (r_idx, c_idx)
-      print(f"test1={test1}")
-
-      test2 = [*zip(*test1)] # transpose
-      print(f"test2={test2}")
-
-    for idx_o, sp in enumerate(spans):
-      # spans[0] == horiz; spans[1] == vert
+    available = [[], []] # horiz and vert list of start positions for len
+    for idx_o, sp in enumerate(self.spaces()):
+      # spaces[0] == horiz; spaces[1] == vert
       orient = []
       for idx_r, row in enumerate(sp):
         orient_row = []
-        for s in row:
+        for s in [s for s in row if s[1] >= length]:
+          # space big enough for len
+          # s[0] is start of spaces column/row, allow for spans bigger than len
           for i in range(s[1]-length+1):
-            # s[0] is start of spaces column, allow for spans bigger than len
-            pos = (idx_r, s[0]+i)
+            # if horiz then s is col; 
+            (row, col) = (idx_r, s[0]+i)
             if idx_o == 1:
-              # vert so transpose; each row is the col, each col is row
-              pos = (pos[1], pos[0])
-            orient_row.append(pos)
+              (row, col) = (col, row) # vert then s is row start
+            orient_row.append((row, col))
         orient.append(orient_row)
-      available[idx_o].append(orient)
+      available[idx_o] = orient
 
     if False:
       print(f"DBG : available(length={length})", Map.dump_arr(available, "available"))
@@ -281,40 +272,58 @@ class Map:
   
   def place_vessel(self, vessel, pos_index, horiz=True):
     res = False
-    vlen = vessel.length
-    available = self.available(vlen)
-    orient = available[0 if horiz == True else 1][0]
-    if 'index' in pos_index:
-      (row, col) = pos_index['index']
-      if row < len(orient) and (len(orient[row]) > 0) and ((row, col) in orient[row]):
-        vessel.pos(pos_index, horiz) # set vessel position
-        res = True
+    available = self.available(vessel.length)
+    orient = available[0 if horiz == True else 1]
+    if pos_index['index'] in [c for r in orient for c in r]:
+      # found (row, col) in available
+      vessel.pos(pos_index, horiz) # set vessel position
+      res = True
     return res
   
-  def place(self, vessel, pos_index, horiz=True):
+  def place(self, vessel, pos, horiz=True):
+    # pos is algebra e.g. 'a1'
     res = False
+    pos_index = self.pos_index(pos=pos)
     if self.place_vessel(vessel, pos_index, horiz):
-      (row, col) = vessel.position[0]['index']  # start index
+      (row, col) = self.pos_index(pos=vessel.position[0])['index']  # start index
       for i in range(vessel.length):
         (irow, icol) = (row, col+i) if horiz == True else (row+i, col)
         self.map[irow][icol] = f"{vessel.abbrv}"
       res = True
     return res
 
-  def random_place(self):
-    while True:
+  def random_place(self, v):
+    res = False
+    avail_flat = []
+    random_index_orient = None  # (index, orient_idx)
+
+    available = self.available(v.length)
+    for idx_o, orient in enumerate(available):
+      # flatten 2d array 
+      avail_flat += [(c, idx_o) for r in orient for c in r]
+    if len(avail_flat):
+      random_index_orient = random.choices(avail_flat)[0]
+    if random_index_orient != None:
+      index = random_index_orient[0]
+      horiz = True if random_index_orient[1] == 0 else False
+      res = self.place(v, self.index_to_pos(index), horiz=horiz)
+    if res == False:
+      print(f"Error: cannot place {v}")
+    else:
+      print(f"DBG random_place: {v}")
+      pass
+
+    return res
+
+  def random_place_all(self):
+    res = True
+    while res:
       vessels = [v for v in self.vessels if not v.is_placed()] # not yet placed
       if len(vessels) == 0:
-        break
-      for v in random.choices(vessels):
-        available = self.available(v.length)
-        if available and len(available) > 0:
-          orient_index = random.randint(0, 1) # 0: horiz, 1: vert
-          orient_list = [d for r in available[orient_index] for c in r for d in c] # flatten 2d array
-          map_index = random.choices(orient_list)[0] # random choice from list
-          pos_index = self.pos_index(index=map_index)
-          if self.place(v, pos_index, horiz=(orient_index == 0)):
-            print(f"DBG random_place: {v}")
+        return True
+      v = random.choices(vessels)
+      res = self.random_place(v[0])
+    return res
 
   def display_map(self):
     str = ""
@@ -347,7 +356,7 @@ class Map:
 #   - <v> is vessel name or abbreviation e.g. 'd' or 'Destroyer' 
 # - reset :: new game
 # - ready :: manual place complete, auto-complete unplaced vessels, wait for opponent ready
-# - fire <pos> :: returns with value 'hit' | 'miss' | 'sunk' [| 'game over']
+# - fire <pos> :: returns with value 'hit' | 'miss' | 'sunk' | 'game over'
 
 # %%
 class CmdLine:
@@ -403,6 +412,16 @@ class CmdLine:
                 print(f"my_map: {my_map}")
             if show_opponent:
                 print(f"opponent_map: {opponent_map}")
+            
+            # --place <v> <pos>:[h|v]
+            if args.place != None:
+              print(f"DBG place {args.place}")
+
+            # --fire <pos>
+            if args.fire != None:
+              print(f"DBG fire {args.fire} returns with value 'hit' | 'miss' | 'sunk' | 'game over'")
+
+
 
 # %%
 class Player(CmdLine):
@@ -422,7 +441,7 @@ if __name__ == "__main__":
   player1 = Player()
 
   player1.my_map.spaces()
-  player1.my_map.random_place()
+  player1.my_map.random_place_all()
 
   player1.cmd(['--info --vessels --show'])
 

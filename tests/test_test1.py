@@ -7,21 +7,13 @@ import os
 #    os.environ[Logging.LOG_ENV] = "1"
 os.environ['BattleShips_LOG'] = "1"
 
-from battleships import Map, Player
+from battleships import Map, Player, Minesweeper, Submarine
 
-def test1():
-    print(Map.dump_arr([1,2,3], str='1d'))
-    print(Map.dump_arr([[1,2,3], [4,5,6]], str='2d'))
-    print(Map.dump_arr([[[1,2,3], [4,5,6]], [[11,12,13], [14,15,16]]], str='3d'))
-
-def test2():
-    print(Map.dump_arr([1,2,3], str='1d'))
-    print(Map.dump_arr([[1,2,3], [4,5,6]], str='2d'))
-    print(Map.dump_arr([[[1,2,3], [4,5,6]], [[11,12,13], [14,15,16]]], str='3d'))
-
-def test3_horiz():
+def test1_horiz():
     dims = [6, 4]   # nrows, ncols
-    vessel_list = Map.vessel_list[0:1] # first vessel type
+    vessel_list = [ # [type, number]
+        [Minesweeper, 3]
+    ]
     player1 = Player(*dims, vessel_list=vessel_list)
 
     info_arr = Map.info_arr(player1.my_map.map)
@@ -34,30 +26,71 @@ def test3_horiz():
 
     for idx, vessel in enumerate(player1.my_map.vessels):
         pos_index = player1.my_map.pos_index(index=(idx, idx))
-        assert player1.my_map.place(vessel, pos_index, horiz=True) == True
+        assert player1.my_map.place(vessel, pos_index['pos'], horiz=True) == True
     print(f"{player1.my_map}")
 
-def test4_vert():
+def test2_vert():
     dims = [6, 4]   # nrows, ncols
-    vessel_list = Map.vessel_list[0:1] # first vessel type
+    vessel_list = [ # [type, number]
+        [Minesweeper, 3]
+    ]
     player1 = Player(*dims, vessel_list=vessel_list)
-
     for idx, vessel in enumerate(player1.my_map.vessels):
         pos_index = player1.my_map.pos_index(index=(idx, idx))
-        assert player1.my_map.place(vessel, pos_index, horiz=False) == True
+        assert player1.my_map.place(vessel, pos_index['pos'], horiz=False) == True
+    print(f"{player1.my_map}")
+
+def test3_simple():
+    dims = [4, 3]   # nrows, ncols
+    vessel_list = [
+        [Minesweeper, 2],
+        [Submarine, 2]
+    ]
+    player1 = Player(*dims, vessel_list=vessel_list)
+    vessels = player1.my_map.vessels
+
+    assert player1.my_map.place(vessels[0], 'b1', horiz=False) == True
+    assert player1.my_map.place(vessels[2], 'a3', horiz=True) == True
+    print(f"{player1.my_map}")
+    return player1
+
+def test4_nospace():
+    player1 = test3_simple()
+    vessels = player1.my_map.vessels
+
+    assert player1.my_map.place(vessels[1], 'a2', horiz=False) == False
+    assert player1.my_map.place(vessels[3], 'a1', horiz=True) == False
     print(f"{player1.my_map}")
 
 def test5_random():
     player1 = Player()
-    player1.my_map.random_place()
+    assert player1.my_map.random_place_all() == True
+    print(f"{player1.my_map}")
+
+def test6_random_nospace():
+    dims = [5, 5]   # nrows, ncols; not enough for vlen == 6
+    player1 = Player(*dims)
+    assert player1.my_map.random_place_all() == False
+    print(f"{player1.my_map}")
+
+def test7_dense():
+    player1 = test3_simple()
+    vessels = player1.my_map.vessels
+
+    assert player1.my_map.random_place(vessels[3]) == True
+    assert player1.my_map.random_place(vessels[1]) == True
+
     print(f"{player1.my_map}")
 
 if __name__ == "__main__":
     # invoked by python and not pytest
-    #test1()
-    #test2()
-    if False:
-        test3_horiz()
-        test4_vert()
-    test5_random()
+    if True:
+        test1_horiz()
+        test2_vert()
+        test3_simple()
+        test4_nospace()
+        test5_random()
+        test6_random_nospace()
+    test7_dense()
+    
     pass
