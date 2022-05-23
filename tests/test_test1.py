@@ -1,7 +1,10 @@
 '''
-pytest searches subdirs for filenames test_*.py or *_test.py,
+`pytest` searches subdirs for filenames test_*.py or *_test.py,
 then it runs functions prefixed "test"
-python3 -m pytest -k test6_dodgy
+$ python3 -m pytest -k test6_dodgy
+
+`coverage` to report source lines that tests visit and don't visit:
+$ rm -rf .coverage htmlcov; PYTHONPATH=. coverage run -m pytest; coverage html; firefox htmlcov/index.html
 '''
 import os
 #    os.environ[Logging.LOG_ENV] = "1"
@@ -104,24 +107,69 @@ def test8_fire():
     for p in players:
         print(p)
     
-    assert players[0].fire('player1', 'a1') == 'x'  # miss
-    assert players[0].fire('player1', 'a1') == 'X'  # dupl miss
+    assert players[0].fire('player1', 'a1') == Player.FIRE_MISS  # 'x' miss
+    assert players[0].fire('player1', 'a1') == Player.FIRE_MISS.upper() # 'X' dupl miss
 
-    assert players[0].fire('player1', 'a2') == 'm'  # hit
-    assert players[0].fire('player1', 'a2') == 'M'  # dupl hit
-    assert players[0].fire('player1', 'c2') == 'x'  # miss
-    assert players[0].fire('player1', 'b2') == 'ms'  # miss
+    assert players[0].fire('player1', 'a2') == Player.FIRE_HIT # 'y' hit
+    assert players[0].fire('player1', 'a2') == Player.FIRE_HIT.upper()  # dupl hit
+    assert players[0].fire('player1', 'c2') == Player.FIRE_MISS  # miss
+    assert players[0].fire('player1', 'b2') == Minesweeper().abbrv +  Player.FIRE_SUNK # sunk
+
+    return players
+
+def test9_show():
+    players = test8_fire()
+    for p in players:
+        print(f"test9_show {p}, {p.show_opponents()}")
+    
+def test10_cmdline():
+    players = test8_fire()
 
     for p in players:
-        print(p, p.show_opponents())
+        res, cmds = p.parse_input('--show')
+        print(f"{4*'+'} {p.id} {4*'+'}")
+        print(f"test10_cmdline cmds: {cmds}\nres: {res}")
+        print(f"{4*'-'} {p.id} {4*'-'}")
 
+def test11_allsunk():
+    players = test8_fire()
 
+    assert players[0].fire('player1', 'a3') == Player.FIRE_HIT # 'y' hit
+    assert players[0].fire('player1', 'b3') == Player.FIRE_HIT
 
+    # (player, opp_map) = self.opponent_maps[opp_id]
+    assert players[0].opponent_maps['player1'][1].allsunk == False
+    assert players[0].fire('player1', 'c3') == Submarine().abbrv +  Player.FIRE_SUNK.upper() # allsunk
+    assert players[0].opponent_maps['player1'][1].allsunk == True
 
+    for p in players[:2]:
+        print(f"{4*'+'} test11_allsunk {p.id} {4*'+'}")
+        print(p)
+        print(f"{4*'-'} test11_allsunk {p.id} {4*'-'}")
 
+def test12_random():
+    all_players = test8_fire()
+    players = all_players[:2]   # two players
 
+    index = 0
+    while True:
+        opp_player = players[index]
+        opp_id = opp_player.id
 
+        index = not index # toggle 0/1
+        player = players[index]
+        id = player.id
 
+        if player.my_map.allsunk == True or (player.opponent_maps[opp_id][1].allsunk == True):
+            print(f"{id if player.my_map.allsunk == True else opp_id} lost")
+            break
+        res = player.random_fire(opp_id)
+        assert res != None 
+    
+    for p in players:
+        print(f"{4*'+'} test12_random {p.id} {4*'+'}")
+        print(p)
+        print(f"{4*'-'} test12_random {p.id} {4*'-'}")
 
 if __name__ == "__main__":
     # invoked by python and not pytest
@@ -133,6 +181,9 @@ if __name__ == "__main__":
         test5_random()
         test6_random_nospace()
         test7_dense()
-    test8_fire()
+        test8_fire()
+        test10_cmdline()
+        test11_allsunk()
+    test12_random()
     
     pass

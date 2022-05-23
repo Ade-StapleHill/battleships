@@ -3,6 +3,7 @@ import sys, argparse
 import re, random
 import logging, os
 
+
 # %%
 class Logging:
   # During development, to save debug values to log file then set env "BattleShips_LOG" and 
@@ -66,7 +67,7 @@ class Vessel:
     return False if self.position == None else True
   
   def __repr__(self):
-    return f"{self.name}: {self.position if self.is_placed() else 'not placed'} hits={self.hits}"
+    return f"{self.name}: {self.position if self.is_placed() else 'not placed'} hits={self.hits} {'sunk' if self.sunk else ''}"
 
 class Minesweeper(Vessel):
   def __init__(self, name='Minesweeper', abbrv='m', length=2, position=None):
@@ -91,7 +92,7 @@ class Carrier(Vessel):
 
 # %%
 class Map:
-  (NROWS, NCOLS) = (15, 20) # map dimensions
+  (NROWS, NCOLS) = (10, 10) # map dimensions
 
   # Default number of each vessel
   vessel_list = [
@@ -246,12 +247,13 @@ class Map:
       print("DBG : ", Map.dump_arr((horiz_list, vert_list), "spaces"))
     return horiz_list, vert_list
 
-  def available(self, length):
+  def available(self, length, spaces=None):
     # return list of (start, end) positions available to place vessel of length
     # two lists returned, horiz list first with space list per row, vert list is space list per col
     available = [[], []] # horiz and vert list of start positions for len
-    for idx_o, sp in enumerate(self.spaces()):
-      # spaces[0] == horiz; spaces[1] == vert
+    if spaces == None:
+      spaces = self.spaces() #  spaces[0] == horiz; spaces[1] == vert
+    for idx_o, sp in enumerate(spaces):
       orient = []
       for idx_r, row in enumerate(sp):
         orient_row = []
@@ -312,7 +314,7 @@ class Map:
     if res == False:
       print(f"Error: cannot place {v}")
     else:
-      print(f"DBG random_place: {v}")
+      Logging.logger.debug(f"random_place: {v}")
       pass
 
     return res
@@ -380,19 +382,20 @@ class Map:
 class Player():
   def __init__(self, id, nrows=Map.NROWS, ncols=Map.NCOLS, vessel_list=Map.vessel_list):
     self.id = id
-    self.parser = argparse.ArgumentParser()
-    self.parse_init()
     self.my_map = Map(nrows, ncols, vessel_list)
-    self.opponent_maps = {}
-    self.first_opponent = None
+    self.opponents = [] # id of each opponent
+    self.opponent_maps = {} # (player, map) for each opponent with id as key e.g. (player, opp_map) = self.opponent_maps[opp_id]
+
+    self.parse_init()
 
   def parse_init(self):
+    self.parser = argparse.ArgumentParser()
     self.parser.add_argument('-i', '--info', dest ='info', 
                 action ='store_true', help ='display info')
 
     #args.show == None if input:'-s', else args.show == '' if no -s option
     self.parser.add_argument('-s', '--show', dest ='show', 
-                action ='store', nargs = '?', choices = {'mine', 'opponent'},
+                action ='store', nargs = '?', choices = self.opponents,
                 default = '', help ='display map')  
     
     self.parser.add_argument('-v', '--vessels', dest ='vessels',
@@ -410,51 +413,62 @@ class Player():
     self.parser.add_argument('-f', '--fire', dest ='fire', 
                 action ='store', nargs = '+', help ='fire <pos> [id]')
   
-  def parse_input(self, lines=sys.stdin):
-    print(f"Enter command: ")
-    for line in lines:
-        args = self.parser.parse_args(line.split())
-        print(f"DBG args: {args}")
+  FIRE_MISS = 'x' # miss, upper if multi
+  FIRE_HIT = 'y'  # hit, upper if multi
+  FIRE_SUNK = 'z' # vessel sunk, upper if all sunk
 
-        if args.info:
-            # --info (alias for --help)
-            self.parser.print_help()
-        
-        # --show
-        show_mine = False
-        show_opponent = False
-        if args.show == None:
-            show_mine = show_opponent = True
-        elif len(args.show) > 0:
-            if args.show == 'mine':
-                show_mine = True
-            else:
-                show_opponent = True
-        if show_mine:
-            print(self.show_mine())
-        if show_opponent:
-            print(self.show_opponents())
-        
-        # --place <v> <pos>:[h|v]
-        if args.place != None:
-          print(f"DBG place {args.place}")
+  def parse_input(self, line):
+    res = ""
+    cmds = []
+    args = self.parser.parse_args(line.split())
+    Logging.logger.debug(f"line: {line}, args: {args}")
 
-        # --fire <pos> [<id>]
-        if args.fire != None:
-          print(f"DBG fire {args.fire} returns with value 'hit' | 'miss' | 'sunk' | 'game over'")
-          pos_index = None
-          id = None
-          if len(args.fire) > 0:
-            pos_index = self.my_map.pos_index(pos=args.fire[0])
-            if pos_index:
-              if len(args.fire) > 1:
-                id = args.fire[1]
-                if id not in self.opponent_maps:
-                  id = None
-              else:
-                id = self.first_opponent
-          if pos_index != None and id != None:
-            self.fire(id, pos_index['pos'])
+    if args.info:
+        # --info (alias for --help)
+        self.parser.print_help()
+        cmds.append('info')
+    
+    # --show
+    show_mine = False
+    show_opponent = False
+    if args.show == None:
+        show_mine = show_opponent = True
+    elif len(args.show) > 0:
+        if args.show == 'mine':
+            show_mine = True
+        else:
+            show_opponent = True
+    if show_mine or show_opponent:
+      cmds.append('show')
+      if show_mine:
+          res += self.show_mine()
+      if show_opponent:
+          res += self.show_opponents()
+    
+    # --place <v> <pos>:[h|v]
+    if args.place != None:
+      cmds.append('place')
+      Logging.logger.debug(f"place {args.place}")
+
+    # --fire <pos> [<id>]
+    if args.fire != None:
+      pos_index = None
+      id = None
+      if len(args.fire) > 0:
+        pos_index = self.my_map.pos_index(pos=args.fire[0])
+        if pos_index:
+          if len(args.fire) > 1:
+            id = args.fire[1]
+            if id not in self.opponent_maps:
+              id = None
+          else:
+            if len(self.opponents) > 0:
+              id = self.opponents[0]  # default is first opponent added
+      if pos_index != None and id != None:
+        res = self.fire(id, pos_index['pos'])
+        cmds.append('fire')
+
+    return res, cmds
 
   def incoming(self, pos):
     # Test if vessel at pos
@@ -463,13 +477,13 @@ class Player():
     pos_index = self.my_map.pos_index(pos=pos)
     if pos_index == None:
       return None
-
+    
     (row, col) = pos_index['index']
     target = self.my_map.map[row][col]
     if target == ' ':
-      res = 'x' # miss
+      res = Player.FIRE_MISS # miss
       target = res
-    elif target.lower() == 'x':
+    elif target.lower() == Player.FIRE_MISS:
       res = 'X' # repeated miss
       target = res
     else:
@@ -482,7 +496,7 @@ class Player():
         v.hits[offset] = True
         target = target.upper() # res is lower, next time this index will be upper
         if False not in v.hits:
-          # Entire vessel hit, check if any remain
+          # Entire vessel hit, check if any vessels remain
           v.sunk = True
           allsunk = True # assume all sunk
           for v in self.my_map.vessels:
@@ -490,23 +504,47 @@ class Player():
               allsunk = False # found one not sunk, so just this vessel sunk, others remain
               break
           self.my_map.allsunk = allsunk
-          info_char = 'S' if allsunk else 's'
-          res = f"{res}{info_char}"
+          info_char = Player.FIRE_SUNK.upper() if allsunk else Player.FIRE_SUNK
+          res += info_char  # return lower first hit, upper next time
+          target += info_char # update my map, target upper
+      if len(res) == 1:
+        # not sunk so change res from abbrv to anon hit
+        res = Player.FIRE_HIT if res == res.lower() else Player.FIRE_HIT.upper()
     self.my_map.map[row][col] = target
+
+    Logging.logger.debug(f"\t\t{self.id} incoming: {pos}; return target={target}, res={res}")
     return res
 
   def update_map(self, opp_id, pos, res):
     # Update map for opponent opp_id
+    allsunk = False
     index = self.my_map.pos_to_index(pos)
     if index != None and (opp_id in self.opponent_maps):
       # result from specific player
       (_player, opp_map) = self.opponent_maps[opp_id]
       (row, col) = index
       opp_map.map[row][col] = res
+      if len(res) > 1:
+        # update opp vessels when sunk. 
+        abbrv = res[0].lower()
+        sunk = res[1]
+        if sunk == Player.FIRE_SUNK.upper():
+          opp_map.allsunk = allsunk = True
+        for v in opp_map.vessels:
+          if v.abbrv == abbrv and (v.sunk == False):
+            v.sunk = True
+            v.position = (pos, pos) # Todo: calculate actual (start, end)
+            for offset in range(len(v.hits)):
+              v.hits[offset] = True
+            break
+    Logging.logger.debug(f"\t{self.id} update_map: {opp_id} {pos} {res} allsunk={allsunk}")
+    return allsunk
 
   def fire(self, opp_id, pos):
     res = None
     index = self.my_map.pos_to_index(pos)
+
+    Logging.logger.debug(f"{self.id} fire: {opp_id} {pos}")
 
     if index != None and (opp_id in self.opponent_maps):
       # result from specific player
@@ -521,28 +559,59 @@ class Player():
         p.update_map(opp_id, pos, res)
 
     return res
+  
+  def random_fire(self, opp_id):
+    horiz_list = []
+    res = None
+
+    if opp_id in self.opponent_maps:
+      (player, map) = self.opponent_maps[opp_id]
+      horiz_list = map.space(map.map)
+      available = map.available(1, [horiz_list])  # (horiz, vert)
+      horiz_list = [col for row in available[0] for col in row]  # flatten 2d array
+    if len(horiz_list) > 0:
+      index = random.choices(horiz_list)[0]
+      pos = Map.index_to_pos_nocheck(index)
+      Logging.logger.debug(f"{self.id} random_fire: {opp_id} {pos}:{index}")
+      res = self.fire(opp_id, pos)
+    
+    return res
 
   def add_opponent(self, player):
     res = False
     if hasattr(player, 'id'):
       id = player.id
       if (id != self.id) and ((id in self.opponent_maps) == False):
+        self.opponents.append(id)
         self.opponent_maps[id] = (player, Map(self.my_map.nrows, self.my_map.ncols, self.my_map.vlist))
-        if self.first_opponent == None:
-          self.first_opponent = id
         res = True
     return res
   
-  def cmd(self, lines=sys.stdin):
-    self.parse_input(lines)
+  def cmdline(self):
+    # read commands from stdin, return True if fire command
+    res = False
+    cmds = []
+    output = None
+
+    line = input(f"{self.id}: Enter command> \n")
+    if line != None:
+      output, cmds = self.parse_input(line)
+    if output != None:
+      print(output)
+      res = ('fire' in cmds)  # True if fire command
+    
+    return res
   
   def show_mine(self):
     str = f"id: {self.id} map:{self.my_map.__repr__()}"
     return str
   
   def show_opponent(self, id):
-    opp_tuple = self.opponent_maps[id] # (player, map)
-    return f"opponent id: {id} map:{opp_tuple[1]}"
+    res = None
+    if id in self.opponent_maps:
+      opp_tuple = self.opponent_maps[id] # (player, map)
+      res = f"opponent id: {id} map:{opp_tuple[1]}"
+    return res
 
   def show_opponents(self):
     str = ""
@@ -556,20 +625,27 @@ class Player():
 
 if __name__ == "__main__":
 # %%
-  players = {}
-  id = 'me'; players[id] = Player(id)
-  id = 'bad2'; players[id] = Player(id)
-  id = 'bad3'; players[id] = Player(id)
+  def main():
+    players = {}
+    id = 'me'; players[id] = Player(id)
+    id = 'bad2'; players[id] = Player(id)
+    #id = 'bad3'; players[id] = Player(id)
 
-  ids = [k for k in players]
-  for id in ids:
-    players[id].my_map.random_place_all()
-    other_ids = ids
-    other_ids.remove(id)
-    for o in other_ids:
-      players[id].add_opponent(players[o])
+    ids = [k for k in players]
+    for id in ids:
+      players[id].my_map.random_place_all()
+      for oid in ids:
+        if oid != id:
+          players[id].add_opponent(players[oid])
 
-  player1 = players['me']
-  player1.cmd(['--info --vessels --show'])
-  while True:
-      player1.cmd()
+    while True:
+      for id in players:
+        if players[id].my_map.allsunk == True:
+          print(f"{id} lost")
+          break
+        while True:
+          if players[id].cmdline() == True:
+            break
+
+#%%
+  main()
