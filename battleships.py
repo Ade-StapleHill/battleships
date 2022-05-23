@@ -319,14 +319,24 @@ class Map:
 
     return res
 
+  def not_placed(self):
+    return [v for v in self.vessels if not v.is_placed()]
+
   def random_place_all(self):
     res = True
     while res:
-      vessels = [v for v in self.vessels if not v.is_placed()] # not yet placed
+      vessels = self.not_placed() # not yet placed
       if len(vessels) == 0:
         return True
       v = random.choices(vessels)
       res = self.random_place(v[0])
+    return res
+  
+  def all_placed(self):
+    res = False
+    vessels = self.not_placed() # not yet placed
+    if len(vessels) == 0:
+        res = True
     return res
 
   def display_map(self):
@@ -401,17 +411,20 @@ class Player():
     self.parser.add_argument('-v', '--vessels', dest ='vessels',
                 action ='store_true', help ='list vessels')
 
-    self.parser.add_argument('-r', '--ready', dest ='ready',
+    self.parser.add_argument('-y', '--ready', dest ='ready',
                 action ='store_true', help ='ready to fire')
     
     self.parser.add_argument('-n', '--new', dest ='new',
                 action ='store_true', help ='new game')
 
     self.parser.add_argument('-p', '--place', dest ='place', 
-                action ='store', nargs = 2, help ='place <v> <pos>:[h|v]')
+                action ='store', nargs = 2, help ='place <v> <pos>[:h|v]')
 
     self.parser.add_argument('-f', '--fire', dest ='fire', 
                 action ='store', nargs = '+', help ='fire <pos> [id]')
+    
+    self.parser.add_argument('-r', '--random', dest ='random', const='arg_was_not_given', 
+                action ='store', nargs = '?', help ='fire [id]')
   
   FIRE_MISS = 'x' # miss, upper if multi
   FIRE_HIT = 'y'  # hit, upper if multi
@@ -421,7 +434,7 @@ class Player():
     res = ""
     cmds = []
     args = self.parser.parse_args(line.split())
-    Logging.logger.debug(f"line: {line}, args: {args}")
+    Logging.logger.debug(f"{self.id} parse_input line: {line}, args: {args}")
 
     if args.info:
         # --info (alias for --help)
@@ -445,10 +458,37 @@ class Player():
       if show_opponent:
           res += self.show_opponents()
     
+    # --vessels
+    if args.vessels == True:
+      cmds.append('vessels')
+      for v in self.my_map.vessels:
+        res += f"{v.__repr__()}\n"
+    
     # --place <v> <pos>:[h|v]
     if args.place != None:
+      #place <v> <pos>[:h|v]
       cmds.append('place')
-      Logging.logger.debug(f"place {args.place}")
+      Logging.logger.debug(f"{self.id} parse_input place: {args.place}")
+      # args.place[0] is <v> abbrv or full name of unplaced
+      vessel_name = args.place[0]
+      for v in self.my_map.vessels:
+        if v.is_placed() == False and \
+          ((vessel_name == v.abbrv) or (vessel_name == v.name)):
+          horiz = True
+          pos = args.place[1].split(':', 1)
+          if len(pos) > 1:
+            if pos[1].lower() == 'v':
+              horiz = False
+          self.my_map.place(v, pos[0], horiz)
+          break
+    
+    # --ready
+    if args.ready == True:
+      cmds.append('ready')
+      Logging.logger.debug(f"{self.id} parse_input: ready")
+      if self.my_map.all_placed() == False:
+        # not all vessels placed
+        self.my_map.random_place_all() ## place remain
 
     # --fire <pos> [<id>]
     if args.fire != None:
@@ -465,7 +505,23 @@ class Player():
             if len(self.opponents) > 0:
               id = self.opponents[0]  # default is first opponent added
       if pos_index != None and id != None:
-        res = self.fire(id, pos_index['pos'])
+        pos = pos_index['pos']
+        Logging.logger.debug(f"{self.id} parse_input: fire {id} {pos}")
+        res = self.fire(id, pos)
+        res = f"{self.id}: fire {pos} {id} = {res}"
+        cmds.append('fire')
+    
+    # --random [<id>]
+    if args.random != None:
+      id = args.random
+      if id == 'arg_was_not_given' and (len(self.opponents) > 0):
+          id = self.opponents[0]  # default is first opponent added
+      elif id not in self.opponent_maps:
+        id = None
+      if id != None:
+        Logging.logger.debug(f"{self.id} parse_input: random_fire {id}")
+        res, pos = self.random_fire(id)
+        res = f"{self.id}: fire {pos} {id} = {res}"
         cmds.append('fire')
 
     return res, cmds
@@ -563,6 +619,7 @@ class Player():
   def random_fire(self, opp_id):
     horiz_list = []
     res = None
+    pos = None
 
     if opp_id in self.opponent_maps:
       (player, map) = self.opponent_maps[opp_id]
@@ -575,7 +632,7 @@ class Player():
       Logging.logger.debug(f"{self.id} random_fire: {opp_id} {pos}:{index}")
       res = self.fire(opp_id, pos)
     
-    return res
+    return res, pos
 
   def add_opponent(self, player):
     res = False
@@ -625,26 +682,55 @@ class Player():
 
 if __name__ == "__main__":
 # %%
+  '''
+  To play computer, when prompted enter commands:
+    * ---place your ships, --ready to random place unplaced vessels
+    * --random for random shots at robot
+    * --fire to bracket adjacent to hit
+    * --show to display map and shots at opponent robot
+    * keep going until allsunk
+    
+  e.g. at the 'me: ' prompt enter commands:
+
+  me: --place Submarine a1
+  me: -p m e4:v
+  me: --ready
+  me: --show
+  me: --random
+    ... random shot, robot shoots back
+  me: --random
+    ... random shot, if a hit then fire adjacent
+  me: --fire b4
+  me: --fire c4
+    ... keep going until allsunk 
+  '''
   def main():
     players = {}
     id = 'me'; players[id] = Player(id)
-    id = 'bad2'; players[id] = Player(id)
+    id = 'robot'; players[id] = Player(id)
     #id = 'bad3'; players[id] = Player(id)
 
     ids = [k for k in players]
     for id in ids:
-      players[id].my_map.random_place_all()
       for oid in ids:
         if oid != id:
           players[id].add_opponent(players[oid])
+    
+    # 'me' need to place
+    players['robot'].my_map.random_place_all() 
 
     while True:
       for id in players:
         if players[id].my_map.allsunk == True:
           print(f"{id} lost")
           break
+        if id == 'robot':
+          res, pos = players[id].random_fire('me') # robot random fire
+          print(f"{id}: fire {pos} me = {res}")
+          break
         while True:
           if players[id].cmdline() == True:
+            # had a fire command
             break
 
 #%%
