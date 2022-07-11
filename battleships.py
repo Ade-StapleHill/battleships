@@ -2,7 +2,7 @@
 import sys, argparse
 import re, random
 import logging, os
-
+from PodSixNet.Connection import connection
 
 # %%
 class Logging:
@@ -17,22 +17,22 @@ class Logging:
   LOG_ENV = 'BattleShips_LOG'
   LOG_FILE = 'battleships.log'
   logger = logging
+  log_flag = LOG_OFF
 
-  def __init__(self):
-    self.log_flag = Logging.LOG_OFF # set 0 to disable logging
-    log_env = os.getenv(self.LOG_ENV)
-    if log_env:
-      self.log_flag = Logging.LOG_LOW 
-      try:
-          self.log_flag = int(log_env)
-      except:
+  def __init__(self, log_file=LOG_FILE):
+    if Logging.log_flag == Logging.LOG_OFF:
+      log_env = os.getenv(self.LOG_ENV)
+      if log_env:
+        Logging.log_flag = Logging.LOG_LOW 
+        try:
+          Logging.log_flag = int(log_env)
+        except:
           pass
+      if Logging.log_flag:
+        self.logger.basicConfig(filename=log_file, filemode='w', \
+            level = logging.DEBUG, format= "%(asctime)s %(message)s",
+            datefmt='%H:%M:%S.%(msecs)03d')
 
-    if self.log_flag:
-      self.logger.basicConfig(filename=self.LOG_FILE, filemode='w', \
-          level = logging.DEBUG, format= "%(message)s")
-
-Logging()
 
 # %% [markdown]
 # # Sketch Code
@@ -113,6 +113,7 @@ class Map:
     for v in self.vlist:
       for i in range(v[1]):
         self.vessels.append(v[0]()) # object init
+    self.turn = False
   
   def is_valid_index(self, row, col):
     # test (row, col) is within map dimensions
@@ -392,6 +393,7 @@ class Map:
 class Player():
   def __init__(self, id, nrows=Map.NROWS, ncols=Map.NCOLS, vessel_list=Map.vessel_list):
     self.id = id
+    self.ready = False
     self.my_map = Map(nrows, ncols, vessel_list)
     self.opponents = [] # id of each opponent
     self.opponent_maps = {} # (player, map) for each opponent with id as key e.g. (player, opp_map) = self.opponent_maps[opp_id]
@@ -441,23 +443,6 @@ class Player():
         self.parser.print_help()
         cmds.append('info')
     
-    # --show
-    show_mine = False
-    show_opponent = False
-    if args.show == None:
-        show_mine = show_opponent = True
-    elif len(args.show) > 0:
-        if args.show == 'mine':
-            show_mine = True
-        else:
-            show_opponent = True
-    if show_mine or show_opponent:
-      cmds.append('show')
-      if show_mine:
-          res += self.show_mine()
-      if show_opponent:
-          res += self.show_opponents()
-    
     # --vessels
     if args.vessels == True:
       cmds.append('vessels')
@@ -486,9 +471,7 @@ class Player():
     if args.ready == True:
       cmds.append('ready')
       Logging.logger.debug(f"{self.id} parse_input: ready")
-      if self.my_map.all_placed() == False:
-        # not all vessels placed
-        self.my_map.random_place_all() ## place remain
+      self.set_ready()
 
     # --fire <pos> [<id>]
     if args.fire != None:
@@ -523,6 +506,23 @@ class Player():
         res, pos = self.random_fire(id)
         res = f"{self.id}: fire {pos} {id} = {res}"
         cmds.append('fire')
+    
+    # --show, done last so that other tokens in string processed
+    show_mine = False
+    show_opponent = False
+    if args.show == None:
+        show_mine = show_opponent = True
+    elif len(args.show) > 0:
+        if args.show == 'mine':
+            show_mine = True
+        else:
+            show_opponent = True
+    if show_mine or show_opponent:
+      cmds.append('show')
+      if show_mine:
+          res += self.show_mine()
+      if show_opponent:
+          res += self.show_opponents()
 
     return res, cmds
 
@@ -596,16 +596,24 @@ class Player():
     Logging.logger.debug(f"\t{self.id} update_map: {opp_id} {pos} {res} allsunk={allsunk}")
     return allsunk
 
+  def player_send(self, data):
+      Logging.logger.debug(f"{os.path.basename(__file__)} {self.id} player_send: data={data}")
+      connection.Send(data)
+
   def fire(self, opp_id, pos):
     res = None
+    if self.turn == False:
+      return 'Not your turn so fire ignored'
     index = self.my_map.pos_to_index(pos)
 
-    Logging.logger.debug(f"{self.id} fire: {opp_id} {pos}")
+    Logging.logger.debug(f"{os.path.basename(__file__)} {self.id} fire: {opp_id} {pos}")
 
     if index != None and (opp_id in self.opponent_maps):
       # result from specific player
       (player, _map) = self.opponent_maps[opp_id]
       res = player.incoming(pos)
+      self.player_send({"action": "fire", "opp_id": opp_id, "pos": pos})
+      self.turn = False
 
     if res != None:
       # update opp_id map for self and all others 
@@ -633,6 +641,13 @@ class Player():
       res = self.fire(opp_id, pos)
     
     return res, pos
+
+  def set_ready(self):
+    if self.my_map.all_placed() == False:
+      # not all vessels placed
+      self.my_map.random_place_all() ## place remain
+    self.ready = True
+    self.player_send({"action": "ready", "id": self.id})
 
   def add_opponent(self, player):
     res = False
@@ -681,6 +696,8 @@ class Player():
     return f"\n{self.show_mine()}\nopponents ids: {[k for k in self.opponent_maps]}"
 
 if __name__ == "__main__":
+# %%
+  Logging()
 # %%
   '''
   To play computer, when prompted enter commands:
