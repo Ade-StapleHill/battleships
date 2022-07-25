@@ -140,12 +140,15 @@ class BattleShipsServer(Server):
 
 # get command line argument of server, port
 if __name__ == '__main__':
+    host = "localhost"
+    port = "31429"
     if len(sys.argv) != 2:
         print("Usage:", sys.argv[0], "host:port")
-        print("e.g.", sys.argv[0], "localhost:31425")
+        print("e.g.", sys.argv[0], f"{host}:{port}")
     else:
-        Logging('battleships_server.log')
         host, port = sys.argv[1].split(":")
-        s = BattleShipsServer(localaddr=(host, int(port)))
-        s.Launch()
+
+    Logging('battleships_server.log')
+    s = BattleShipsServer(localaddr=(host, int(port)))
+    s.Launch()
 

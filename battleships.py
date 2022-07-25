@@ -30,8 +30,8 @@ class Logging:
           pass
       if Logging.log_flag:
         self.logger.basicConfig(filename=log_file, filemode='w', \
-            level = logging.DEBUG, format= "%(asctime)s %(message)s",
-            datefmt='%H:%M:%S.%(msecs)03d')
+            level = logging.DEBUG, format= "%(asctime)s.%(msecs)03d %(message)s",
+            datefmt='%H:%M:%S')
 
 
 # %% [markdown]
@@ -654,6 +654,7 @@ class Player():
     if hasattr(player, 'id'):
       id = player.id
       if (id != self.id) and ((id in self.opponent_maps) == False):
+        Logging.logger.debug(f"{self.id} add_opponent: {id}")
         self.opponents.append(id)
         self.opponent_maps[id] = (player, Map(self.my_map.nrows, self.my_map.ncols, self.my_map.vlist))
         res = True

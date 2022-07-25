@@ -17,9 +17,9 @@ from conftest import hostname, port
 def test_robot2():
     xargs = {}
     xargs['id'] = 'robot2'
-    xargs['cmds'] = ['--place d a2 --ready --show', '--fire a1', '--show']
+    xargs['cmds'] = ['--info --place d a2 --ready --show']
     c = BattleShipsClient(hostname, int(port), **xargs)
-    print(f"opponents: {c.show_opponents()}")
+    print(f"test_robot2: {hostname}, {port}, {xargs} opponents: {c.show_opponents()}")
 
 if __name__ == "__main__":
     # invoked by python and not pytest

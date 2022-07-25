@@ -76,9 +76,10 @@ class BattleShipsClient(Player, ConnectionListener):
     
     def Network_players(self, data):
         print("*** players: " + ", ".join([p for p in data['players']]))
-        for nickname in data['players']:
-            if nickname != self.id and (nickname not in self.opponent_maps):
-                self.add_opponent(nickname)
+        for id in data['players']:
+            if (id != self.id) and ((id in self.opponent_maps) == False):
+                p = Player(id)
+                self.add_opponent(p)
     
     def Network_message(self, data):
         print(data['who'] + ": " + data['message'])
@@ -109,7 +110,7 @@ class BattleShipsClient(Player, ConnectionListener):
         print(f"Your turn {self.id}", flush=True)
         (callback, parm) = self.turn_callback
         if callback != None:
-            callback(self, parm)
+            callback(self)
 
     def Network_updatemap(self, data):
         opp_id = data['opp_id']
@@ -117,17 +118,20 @@ class BattleShipsClient(Player, ConnectionListener):
             self.update_map(opp_id, data['pos'], data['res'])
 
 if __name__ == '__main__':
+    host = "localhost"
+    port = "31429"
     if len(sys.argv) < 2:
         print("Usage:", sys.argv[0], "host:port [id [cmds]]")
-        print("e.g.", sys.argv[0], "localhost:31425 robot1 '--place d a1'")
+        print("e.g.", sys.argv[0], f"{host}:{port} robot1 '--place d a1'")
     else:
         host, port = sys.argv[1].split(":")
-        xargs = {}
-        if len(sys.argv) > 2:
-            xargs['id'] = sys.argv[2]
-            if len(sys.argv) > 3:
-                xargs['cmds'] = sys.argv[3:]
-        c = BattleShipsClient(host, int(port), **xargs)
-        while 1:
-            c.Loop()
-            sleep(0.001)
+    xargs = {}
+    xargs['id'] = 'robot1'
+    if len(sys.argv) > 2:
+        xargs['id'] = sys.argv[2]
+        if len(sys.argv) > 3:
+            xargs['cmds'] = sys.argv[3:]
+    c = BattleShipsClient(host, int(port), **xargs)
+    while 1:
+        c.Loop()
+        sleep(0.001)
